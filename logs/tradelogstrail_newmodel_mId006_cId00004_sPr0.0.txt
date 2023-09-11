@@ -1,0 +1,4 @@
+
+## START ### 
+
+ID              | Open Time       | Close Time      | Side            | Amount          | Open Price      | Close Price     | Close Type      | Capital Change 
