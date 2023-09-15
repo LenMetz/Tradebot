@@ -1,5 +1,5 @@
 import torch.nn as nn
-from torch import Tensor
+from torch import Tensor, true_divide
 import torch.nn.functional as F
 import torch, math
 import time
@@ -81,11 +81,11 @@ class Temporal_Conv_Transformer(nn.Module):
         return y, x[:,0], x[:,1]
 
 class Temporal_Conv_Transformer_Vol(nn.Module):
-    def __init__(self, seq_length=500, n_hidden = 1000, feature_size=1,num_layers=3, out_channels=3, dropout=0,batch_first=True):
+    def __init__(self, seq_length=500, n_hidden = 1000, feature_size=1,num_layers=3, out_channels=3, kernel_size=3, dropout=0,batch_first=True):
         super().__init__()
         self.seq_length = seq_length
         self.cns = out_channels
-        self.knl = 3
+        self.knl = kernel_size
         self.d_model =  1+1+feature_size*self.cns
         self.reduced_length = self.seq_length-pow(2,(feature_size-1))*(self.knl-1)
         self.dil_convs = nn.ModuleList([])
@@ -93,7 +93,7 @@ class Temporal_Conv_Transformer_Vol(nn.Module):
             self.dil_convs.append(nn.Conv1d(1,self.cns,self.knl,1,0,int(pow(2,dil))))
         self.pos_enc = PositionalEncoding(d_model =self.d_model)
         
-        self.encoder_layer = nn.TransformerEncoderLayer(d_model=self.d_model, nhead=1, dropout=dropout, batch_first=True)
+        self.encoder_layer = nn.TransformerEncoderLayer(d_model=self.d_model, nhead=1, dropout=dropout, batch_first=True, norm_first=True)
         self.encoder = nn.TransformerEncoder(self.encoder_layer, num_layers=num_layers)        
         self.linear1 = nn.Linear(self.reduced_length*self.d_model, n_hidden)
         self.linear2 = nn.Linear(n_hidden, 100)

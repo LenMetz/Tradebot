@@ -13,7 +13,7 @@ def train(epoch, model, lr, trainloader, testloader, seq_length, batch_size, los
     for t in range(epoch):
         epoch_loss = 0
         batch_loss = 0
-        model.eval()
+        model.train()
         for batch_idx, (src, vol, tgt) in enumerate(trainloader):
             
             optimizer.zero_grad()
@@ -148,6 +148,40 @@ def test_conf_ensemble(model1, model2, testloader, seq_length, batch_size, volb=
     print("average mu of NOT correct predictions:", mus_f/(fp+fn))
     print("average std of correct predictions:", std_t/(tp+tn))
     print("average std of NOT correct predictions:", std_f/(fp+fn))
+    return accuracy
+
+def test_conf_ensemble_step(model1, model2, model3, testloader1, testloader2, testloader3, seq_length, batch_size, volb=False):
+    model1.eval()
+    model2.eval()
+    model3.eval()
+    test2 = iter(testloader2)
+    test3 = iter(testloader3)
+    tp, tn, fp, fn = 0, 0, 0, 0
+    for batch_idx, (src1, vol1, tgt1) in enumerate(testloader1):
+        src2, vol2, tgt2 = next(test2)
+        src3, vol3, tgt3 = next(test3)
+        eps = torch.normal(torch.zeros(src1.size()[0]),torch.ones(src1.size()[0]))
+        src1, vol1, tgt1, eps = src1.to(device), vol1.to(device), tgt1.to(device), eps.to(device)
+        src2, vol2, tgt2 = src2.to(device), vol2.to(device), tgt2.to(device)
+        src3, vol3, tgt3 = src3.to(device), vol3.to(device), tgt3.to(device)
+        with torch.no_grad():
+            prediction1, mus1, stds1 = model1(src1, vol1, eps)
+            prediction2, mus2, stds1 = model2(src2, vol2, eps)
+            prediction3, mus3, stds3 = model3(src3, vol3, eps)
+        mu1_signs = 0.5+0.5*torch.sign(mus1)
+        mu2_signs = 0.5+0.5*torch.sign(mus2)
+        mu3_signs = 0.5+0.5*torch.sign(mus3)
+        tgt_signs = 0.5+0.5*torch.sign(tgt1)
+        tp += torch.sum(mu3_signs*mu2_signs*mu1_signs*tgt_signs*torch.sign(tgt1)*torch.sign(tgt1))
+        fp += torch.sum(mu3_signs*mu2_signs*mu1_signs*(1-tgt_signs)*torch.sign(tgt1)*torch.sign(tgt1))
+        tn += torch.sum((1-mu3_signs)*(1-mu2_signs)*(1-mu1_signs)*(1-tgt_signs)*torch.sign(tgt1)*torch.sign(tgt1))
+        fn += torch.sum((1-mu3_signs)*(1-mu2_signs)*(1-mu1_signs)*tgt_signs*torch.sign(tgt1)*torch.sign(tgt1))
+    accuracy = (tp+tn)/(tp+fp+tn+fn)
+    print("tp: ", tp)
+    print("fp: ", fp)
+    print("tn: ", tn)
+    print("fn: ", fn)
+    print("accuracy: ", accuracy)
     return accuracy
 
 def test_conf_val(model, testloader, seq_length, batch_size, clip):

@@ -16,18 +16,21 @@ class OfflineBot:
         file = open(f'configs/tradeConfig_{inputs.configId}', 'rb')
         self.config = pickle.load(file)
         file.close()
-        self.model = Temporal_Conv_Transformer_Vol(seq_length = self.config["sequenceLength"], feature_size=self.config["featureSize"],
+        self.model1 = Temporal_Conv_Transformer_Vol(seq_length = self.config["sequenceLength"], feature_size=self.config["featureSize"], out_channels=self.config["out_channels"],
                                           dropout=self.config["dropout"], num_layers=self.config["numLayers"])
-        #self.model2 = Temporal_Conv_Transformer_Vol(seq_length = self.config["sequenceLength"], feature_size=self.config["featureSize"],
-                                          #dropout=self.config["dropout"], num_layers=self.config["numLayers"])
-        #self.model3 = Temporal_Conv_Transformer_Vol(seq_length = self.config["sequenceLength"], feature_size=self.config["featureSize"],
-                                          #dropout=self.config["dropout"], num_layers=self.config["numLayers"])
-        self.model.load_state_dict(torch.load("model/" + inputs.modelId+".pt", map_location=device))
-        #self.model2.load_state_dict(torch.load("model/" + inputs.modelId2+".pt", map_location=device))
-        #self.model3.load_state_dict(torch.load("model/" + inputs.modelId3+".pt", map_location=device))
-        self.model.to(device)
-        #self.model2.to(device)
-        #self.model3.to(device)
+        self.model2 = Temporal_Conv_Transformer_Vol(seq_length = self.config["sequenceLength"], feature_size=self.config["featureSize"], out_channels=self.config["out_channels"],
+                                          dropout=self.config["dropout"], num_layers=self.config["numLayers"])
+        self.model3 = Temporal_Conv_Transformer_Vol(seq_length = self.config["sequenceLength"], feature_size=self.config["featureSize"], out_channels=self.config["out_channels"],
+                                          dropout=self.config["dropout"], num_layers=self.config["numLayers"])
+        self.model1.load_state_dict(torch.load("model/" + inputs.modelId+"_1.pt", map_location=device))
+        self.model2.load_state_dict(torch.load("model/" + inputs.modelId+"_2.pt", map_location=device))
+        self.model3.load_state_dict(torch.load("model/" + inputs.modelId+"_3.pt", map_location=device))
+        self.model1.eval()
+        self.model2.eval()
+        self.model3.eval()
+        self.model1.to(device)
+        self.model2.to(device)
+        self.model3.to(device)
         self.server = Server()
         self.logfile = f"logs/tradelogs{inputs.name}_mIds{inputs.modelId}_cId{inputs.configId}_sPr{inputs.slip}.txt"
         s1, s2, s3, s4, s5, s6, s7, s8, s9  = "ID", "Open Time", "Close Time", "Side", "Amount",\
@@ -53,7 +56,9 @@ class OfflineBot:
         self.profits = 0
         self.losses = 0
         self.t = 0
+        self.tgtsT = []
         self.f = 0
+        self.tgtsF = []
 
 
     def saveTrade(self, tradeNum, openTime, closeTime, side, openAmount, openPrice, exitPrice, closeType, change):
@@ -71,20 +76,27 @@ class OfflineBot:
             tgt = torch.tensor(self.server.getTgt(self.timeStepSecond, self.tgtStep)-self.prices[-1])
             eps = torch.zeros(src.size())
             with torch.no_grad():
-                pred, mu, std = self.model(src, vol, eps)
+                pred1, mu1, std1 = self.model1(src, vol, eps)
+                pred2, mu2, std2 = self.model2(src, vol, eps)
+                pred3, mu3, std3 = self.model3(src, vol, eps)
             #mu = -mu
             #mu = torch.bernoulli(torch.tensor(0.5))*(-2)+1
             
                 
-            if torch.abs(mu)>=self.config["muClip"]*self.config["maxMu"] and torch.abs(std)<=self.config["stdClip"]*self.config["maxStd"]:
-                if torch.sign(mu)==torch.sign(tgt):
+            #if torch.abs(mu)>=self.config["muClip"]*self.config["maxMu"] and torch.abs(std)<=self.config["stdClip"]*self.config["maxStd"]:
+            if torch.abs(mu3)>=self.config["muClip"]*self.config["maxMu"] and torch.sign(mu1)==torch.sign(mu2) and torch.sign(mu1)==torch.sign(mu3):
+            #if True:
+                #print("open:", priceClose, torch.sign(mu3).item(), torch.sign(tgt).item())
+                if torch.sign(mu3)==torch.sign(tgt):
                     self.t +=1
+                    self.tgtsT.append(tgt)
                 else:
                     self.f +=1
+                    self.tgtsF.append(tgt)
                 self.tradeNum += 1
-                side = int(torch.sign(mu))
+                side = int(torch.sign(mu3))
                 openAmount = self.config["invest"]*self.config["leverage"]*self.capital/priceClose
-                openAmount = round(openAmount - openAmount*(self.config["fees"]+self.config["spread"]),3)
+                openAmount = round(openAmount - openAmount*(self.config["fees"]),3)
                 takeProfit = round(priceClose + side*self.config["takeProfit"]*priceClose/self.config["leverage"], 2)
                 stopLoss = round(priceClose + side*self.config["stopLoss"]*priceClose/self.config["leverage"], 2)
                 #print(side, takeProfit, stopLoss, priceClose)
@@ -96,27 +108,28 @@ class OfflineBot:
         result, change, exitPrice = self.trade.step(priceClose, priceLow, priceHigh)
         
         if result!="hold":
+            #print("close:", priceClose, result, change, self.timeStep-self.trade.openTime)
             #print(result, change, self.capital)
             slip = np.random.binomial(1,self.slipProb,1)[0]
-            
+            side_int = -int(self.trade.side=="Short")+int(self.trade.side=="Long")
             #if (exitPrice-self.trade.openPrice)*(-int(self.trade.side=="Short")+int(self.trade.side=="Long"))<0:
             if result=="Stop loss":
                 #print("\n", change)
-                change = slip*change + (1-slip)*self.trade.openAmount*(self.trade.stopLoss-self.trade.openPrice)*\
-                (-int(self.trade.side=="Short")+int(self.trade.side=="Long"))
+                change = slip*change + (1-slip)*self.trade.openAmount*(self.trade.stopLoss-self.trade.openPrice-side_int*self.config["spread"]*self.trade.stopLoss)*(side_int)
                 #print(change, slip, self.trade.side, self.trade.openPrice, self.trade.stopLoss, exitPrice)
-                self.capital += change - self.config["invest"]*self.capital*(self.config["fees"]+self.config["spread"])*self.config["leverage"]
+                self.capital += change - self.config["invest"]*self.capital*(self.config["fees"])*self.config["leverage"]
                 if change<0:
                     self.cooldown = self.config["cooldown_reset_l"]
                     self.losses += 1
                     self.tradeProb = self.config["penalty"]*self.tradeProb
                 else:
+                    self.cooldown = self.config["cooldown_reset_p"]
                     self.profits += 1
+                    self.tradeProb = (3/self.config["penalty"])*self.tradeProb
             else:
-                change = round(self.trade.openAmount*(self.trade.takeProfit-self.trade.openPrice)*\
-                               (-int(self.trade.side=="Short")+int(self.trade.side=="Long")), 3)
+                change = round(self.trade.openAmount*(self.trade.takeProfit-self.trade.openPrice-side_int*self.config["spread"]*self.trade.takeProfit)*(side_int), 3)
                 self.cooldown = self.config["cooldown_reset_p"]
-                self.capital += change - self.config["invest"]*self.capital*(self.config["fees"]+self.config["spread"])*self.config["leverage"]
+                self.capital += change - self.config["invest"]*self.capital*(self.config["fees"])*self.config["leverage"]
                 self.profits += 1
                 self.tradeProb = (3/self.config["penalty"])*self.tradeProb
                 
@@ -124,13 +137,6 @@ class OfflineBot:
                            self.trade.openPrice, exitPrice, result, change)
             self.tradeLens += self.timeStep-self.trade.openTime
             self.trade = None
-            
-
-                
-            
-            #    if self.trade is not None:
-            #       print(self.trade.openPrice, self.trade.stopLoss, self.trade.takeProfit, priceClose)
-
         self.capitalOverTime.append(self.capital)
         
 
@@ -158,10 +164,16 @@ class OfflineBot:
                         print("capital: ", self.capital)
                         print("p | l | p/p+l", self.profits, self.losses, self.profits/(self.profits+self.losses))
                         print("t | n | t/t+n", self.t,self.f, self.t/(self.t+self.f))
+                        print("avg correct tgt", torch.median(torch.abs(torch.tensor(self.tgtsT))))
+                        print("avg NOT correct tgt", torch.median(torch.abs(torch.tensor(self.tgtsF))))
                         print(self.tradeLens/(self.tradeNum-self.lastTradeNum))
                         self.tradeLens, self.lastTradeNum = 0, self.tradeNum
-                        #self.t=0
-                        #self.f=0
+                        self.profits=0
+                        self.losses=0
+                        self.t=0
+                        self.f=0
+                        self.tgtsT = []
+                        self.tgtsF = []
                 self.timeStep+=1
             
             #self.performTrade(priceClose, priceClose, priceClose)
