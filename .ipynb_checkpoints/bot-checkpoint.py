@@ -59,6 +59,8 @@ class OfflineBot:
         self.tgtsT = []
         self.f = 0
         self.tgtsF = []
+        self.lastTradeCor = False
+        self.corPredAndProfit = 0
 
 
     def saveTrade(self, tradeNum, openTime, closeTime, side, openAmount, openPrice, exitPrice, closeType, change):
@@ -86,11 +88,14 @@ class OfflineBot:
             #if torch.abs(mu)>=self.config["muClip"]*self.config["maxMu"] and torch.abs(std)<=self.config["stdClip"]*self.config["maxStd"]:
             if torch.abs(mu3)>=self.config["muClip"]*self.config["maxMu"] and torch.sign(mu1)==torch.sign(mu2) and torch.sign(mu1)==torch.sign(mu3):
             #if True:
+                #print(self.prices[-1], mu3, tgt)
                 #print("open:", priceClose, torch.sign(mu3).item(), torch.sign(tgt).item())
                 if torch.sign(mu3)==torch.sign(tgt):
+                    self.lastTradeCor = True
                     self.t +=1
                     self.tgtsT.append(tgt)
                 else:
+                    self.lastTradeCor = False
                     self.f +=1
                     self.tgtsF.append(tgt)
                 self.tradeNum += 1
@@ -108,6 +113,7 @@ class OfflineBot:
         result, change, exitPrice = self.trade.step(priceClose, priceLow, priceHigh)
         
         if result!="hold":
+            #print(result, exitPrice, "\n")
             #print("close:", priceClose, result, change, self.timeStep-self.trade.openTime)
             #print(result, change, self.capital)
             slip = np.random.binomial(1,self.slipProb,1)[0]
@@ -132,6 +138,8 @@ class OfflineBot:
                 self.capital += change - self.config["invest"]*self.capital*(self.config["fees"])*self.config["leverage"]
                 self.profits += 1
                 self.tradeProb = (3/self.config["penalty"])*self.tradeProb
+                if self.lastTradeCor:
+                    self.corPredAndProfit += 1
                 
             self.saveTrade(self.trade.orderId, self.trade.openTime, self.timeStep, self.trade.side, self.trade.openAmount,\
                            self.trade.openPrice, exitPrice, result, change)
@@ -164,16 +172,18 @@ class OfflineBot:
                         print("capital: ", self.capital)
                         print("p | l | p/p+l", self.profits, self.losses, self.profits/(self.profits+self.losses))
                         print("t | n | t/t+n", self.t,self.f, self.t/(self.t+self.f))
-                        print("avg correct tgt", torch.median(torch.abs(torch.tensor(self.tgtsT))))
-                        print("avg NOT correct tgt", torch.median(torch.abs(torch.tensor(self.tgtsF))))
-                        print(self.tradeLens/(self.tradeNum-self.lastTradeNum))
+                        print("correct preds and profit", self.corPredAndProfit)
+                        print("mean correct tgt", torch.mean(torch.abs(torch.tensor(self.tgtsT))))
+                        print("mean NOT correct tgt", torch.mean(torch.abs(torch.tensor(self.tgtsF))))
+                        print("mean trade length", self.tradeLens/(self.tradeNum-self.lastTradeNum))
                         self.tradeLens, self.lastTradeNum = 0, self.tradeNum
-                        self.profits=0
-                        self.losses=0
-                        self.t=0
-                        self.f=0
-                        self.tgtsT = []
-                        self.tgtsF = []
+                        #self.profits=0
+                        #self.losses=0
+                        #self.t=0
+                        #self.f=0
+                        #self.tgtsT = []
+                        #self.tgtsF = []
+                        #self.corPredAndProfit = 0
                 self.timeStep+=1
             
             #self.performTrade(priceClose, priceClose, priceClose)
