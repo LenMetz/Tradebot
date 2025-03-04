@@ -6,7 +6,7 @@ Price movement is treated as a binary classification problem. Data samples are a
 Predictive accuracy is up to 60-70%.
 
 
-Trading strategy (when to enter trade, how to set take-profit/stop-loss, etc...) was realized either through fixed rules or through a genetic algorithm based on predictions from classification model.
+Trading strategy (when to enter trade, how to set take-profit/stop-loss, etc...) was realized either through fixed rules or through a genetic algorithm. Tradings signals are the predictions from classification model.
 
 
 Strategy was tested on simulated trading environment, including all necessary details for analysis of viability of the algorithm, like spread, slippage, fees, triggering of TP/SL, trailing SL.
